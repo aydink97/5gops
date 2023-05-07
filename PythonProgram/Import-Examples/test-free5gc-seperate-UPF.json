@@ -1,0 +1,11 @@
+{
+    "solution" : "free5gc",
+    "seperateUPF" : true,
+    "scriptpath" : "~/Documents/Bachelor/5gops/PythonProgram/Scripts",
+    "amf" : "192.168.122.173",
+    "ue" : "192.168.122.72",
+    "homepath" : "/home/user5g",
+    "upf" : "192.168.122.10",
+    "web" : "192.168.122.173",
+    "user" : "user5g"
+}

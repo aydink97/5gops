@@ -1,0 +1,5 @@
+PythonProgram/Output/*
+!PythonProgram/Output/.gitkeep
+test-replace.yaml
+TestTKinter.py
+.vscode/

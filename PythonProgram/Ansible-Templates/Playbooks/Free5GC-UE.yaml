@@ -1,0 +1,87 @@
+- name: Setup UERANSIM
+  hosts: ue
+
+  vars:
+    homepath: "{{homepath.input}}"
+    scriptpath: "{{scriptpath.input}}"
+    amfip: "{{amfip.input}}"
+    ueip: "{{ue.input}}"
+
+  tasks:
+
+    # Update apt and install packages if necessary
+    - name: Install dependencies
+      ansible.builtin.apt:
+        name:
+          - make
+          - gcc
+          - g++
+          - libsctp-dev
+          - lksctp-tools
+          - iproute2
+          - git
+        update_cache: true
+        state: present
+      become: true
+
+    # Install CMake from Snap
+    - name: Install CMake from Snap
+      community.general.snap:
+        name: cmake
+        classic: true
+      become: true
+
+    - name: Clone a repo with separate git directory
+      ansible.builtin.git:
+        repo: https://github.com/aligungr/UERANSIM
+        dest: "{{ homepath }}/UERANSIM"
+        clone: true
+        update: false
+        version: 'master'
+
+    - name: Build UERANSIM
+      make:
+        chdir: "{{ homepath }}/UERANSIM"
+
+    # Configure AMF in GNB configuration
+    - name: Configure AMF IP Address
+      ansible.builtin.replace:
+        path: "{{ homepath }}/UERANSIM/config/free5gc-gnb.yaml"
+        regexp: '^.*Configs:\n.*$'
+        replace: 'amfConfigs:\n  - address: {{ amfip }}'
+
+    # Configure linkIp in GNB configuration
+    - name: Configure linkIp
+      ansible.builtin.replace:
+        path: "{{ homepath }}/UERANSIM/config/free5gc-gnb.yaml"
+        regexp: '^.*linkIp:.*'
+        replace: 'linkIp: {{ ueip }}'
+
+    # Configure ngapIp in GNB configuration
+    - name: Configure ngapIp
+      ansible.builtin.replace:
+        path: "{{ homepath }}/UERANSIM/config/free5gc-gnb.yaml"
+        regexp: '^.*ngapIp:.*'
+        replace: 'ngapIp: {{ ueip }}'
+
+
+    # Configure gtpIp in GNB configuration
+    - name: Configure gtpIp IP Address
+      ansible.builtin.replace:
+        path: "{{ homepath }}/UERANSIM/config/free5gc-gnb.yaml"
+        regexp: '^.*gtpIp:.*'
+        replace: 'gtpIp: {{ ueip }}'
+
+
+    # Configure gnbSearchList in UE configuration
+    - name: Change gnbSearchList IP Address
+      ansible.builtin.replace:
+        path: "{{ homepath }}/UERANSIM/config/free5gc-ue.yaml"
+        regexp: '^.*gnbSearchList:.*\n.*'
+        replace: 'gnbSearchList:\n  - {{ ueip }}'
+
+    # Run GNB Station and UE
+    - name: Run GNB and UE
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/runUERANSIM-F5GC.sh"
+      become: true

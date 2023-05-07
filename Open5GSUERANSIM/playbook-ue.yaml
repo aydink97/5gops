@@ -1,0 +1,81 @@
+- name: Setup UERANSIM
+  hosts: ue
+
+  tasks:
+
+    # Update apt and install packages if necessary
+    - name: Install dependencies
+      ansible.builtin.apt:
+        name:
+          - make
+          - gcc
+          - g++
+          - libsctp-dev
+          - lksctp-tools
+          - iproute2
+          - git
+        update_cache: true
+        state: present
+      become: true
+
+    # Install CMake from Snap
+    - name: Install CMake from Snap
+      community.general.snap:
+        name: cmake
+        classic: true
+      become: true
+
+    - name: Clone a repo with separate git directory
+      ansible.builtin.git:
+        repo: https://github.com/aligungr/UERANSIM
+        dest: /home/user5g/UERANSIM
+        clone: true
+        update: false
+        version: 'master'
+
+    - name: Build UERANSIM
+      make:
+        chdir: /home/user5g/UERANSIM
+
+    # Configure AMF in GNB configuration
+    - name: Configure AMF IP Address
+      ansible.builtin.replace:
+        path: /home/user5g/UERANSIM/config/open5gs-gnb.yaml
+        regexp: '^.*Configs:\n.*$'
+        replace: 'amfConfigs:\n  - address: 192.168.122.61'
+
+    # Configure linkIp in GNB configuration
+    - name: Configure linkIp
+      ansible.builtin.replace:
+        path: /home/user5g/UERANSIM/config/open5gs-gnb.yaml
+        regexp: '^.*linkIp:.*'
+        replace: 'linkIp: 192.168.122.72'
+
+    # Configure ngapIp in GNB configuration
+    - name: Configure ngapIp
+      ansible.builtin.replace:
+        path: /home/user5g/UERANSIM/config/open5gs-gnb.yaml
+        regexp: '^.*ngapIp:.*'
+        replace: 'ngapIp: 192.168.122.72'
+
+
+    # Configure gtpIp in GNB configuration
+    - name: Configure gtpIp IP Address
+      ansible.builtin.replace:
+        path: /home/user5g/UERANSIM/config/open5gs-gnb.yaml
+        regexp: '^.*gtpIp:.*'
+        replace: 'gtpIp: 192.168.122.72'
+
+
+    # Configure gnbSearchList in UE configuration
+    - name: Change gnbSearchList IP Address
+      ansible.builtin.replace:
+        path: /home/user5g/UERANSIM/config/open5gs-ue.yaml
+        regexp: '^.*gnbSearchList:.*\n.*'
+        replace: 'gnbSearchList:\n  - 192.168.122.72'
+
+    # Run GNB Station and UE
+    - name: Run GNB and UE
+      ansible.builtin.script:
+        cmd: ~/Documents/Bachelor/5gops/Open5GSUERANSIM/runUERANSIM.sh
+      become: true

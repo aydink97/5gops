@@ -1,0 +1,258 @@
+- name: Setup 5GCore
+  hosts: core
+
+  vars:
+    homepath: "{{homepath.input}}"
+    hostname: "{{hostname.input}}"
+    scriptpath: "{{scriptpath.input}}"
+    amf: "{{amf_ip}}"
+    upf: "{{upf_ip}}"
+
+  environment:
+    HOSTNAME: "{{ hostname }}"
+
+  tasks:
+
+    - name: Ping my hosts
+      ansible.builtin.ping:
+
+    - name: Print message
+      ansible.builtin.debug:
+        msg: Hello world
+
+    # Disable unattended-upgrades
+    - name: Disable unattended-upgrades
+      ansible.builtin.systemd:
+        state: stopped
+        name: unattended-upgrades
+        enabled: false
+      become: true
+
+    # Update apt and install packages if necessary
+    - name: Install wget gnupg curl
+      ansible.builtin.apt:
+        name:
+          - wget
+          - gnupg
+          - curl
+        update_cache: true
+        state: present
+      become: true
+
+    # Import GPG Key and add it into apt trusted sources
+    - name: MongoDB | no apt key
+      ansible.builtin.get_url:
+        url: https://www.mongodb.org/static/pgp/server-6.0.asc
+        dest: /etc/apt/trusted.gpg.d/server-6.0.asc
+      become: true
+    - name: MongoDB | apt sources
+      ansible.builtin.apt_repository:
+        repo: "deb https://repo.mongodb.org/apt/ubuntu/ jammy/mongodb-org/6.0 multiverse"
+        state: present
+        filename: mongodb-org-6.0.list
+        update_cache: true
+      become: true
+
+    - name: Install MongoDB
+      ansible.builtin.apt:
+        name: mongodb-org
+        update_cache: true
+        state: present
+      become: true
+
+    - name: Enable Ipv6 MongoDB server
+      ansible.builtin.replace:
+        path: /etc/mongod.conf
+        regexp: '^.*net:\n  port: 27017\n  bindIp: 127.0.0.1\n.*'
+        replace: 'net:\n  port: 27017\n  bindIp: 127.0.0.1, ::1\n  ipv6: true'
+      become: true
+
+    - name: Start & Enable the MongoDB Service
+      ansible.builtin.systemd:
+        state: started
+        name: mongod
+        enabled: true
+      become: true
+
+    # Install NodeJs via apt
+    - name: "Add nodejs apt key"
+      ansible.builtin.apt_key:
+        url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
+        state: present
+      become: true
+
+    - name: "Add nodejs 18.x ppa for apt repo"
+      ansible.builtin.apt_repository:
+        repo: deb https://deb.nodesource.com/node_18.x jammy main
+        update_cache: true
+      become: true
+
+    - name: Install NodeJs
+      ansible.builtin.apt:
+        name: nodejs
+        state: present
+      become: true
+
+    # Getting necessary dependencies for building from source
+    - name: Get build dependencies
+      ansible.builtin.apt:
+        name:
+          - python3-pip
+          - python3-setuptools
+          - python3-wheel
+          - ninja-build
+          - build-essential
+          - flex
+          - bison
+          - git
+          - cmake
+          - libsctp-dev
+          - libgnutls28-dev
+          - libgcrypt-dev
+          - libssl-dev
+          - libidn11-dev
+          - libmongoc-dev
+          - libbson-dev
+          - libyaml-dev
+          - libnghttp2-dev
+          - libmicrohttpd-dev
+          - libcurl4-gnutls-dev
+          - libnghttp2-dev
+          - libtins-dev
+          - libtalloc-dev
+          - meson
+        state: present
+      become: true
+
+      # If a select a tag it does not work, if I let it be the linter complains... and it creates the folder in root/ of course
+    - name: Clone a repo with separate git directory
+      ansible.builtin.git:
+        repo: https://github.com/open5gs/open5gs.git
+        dest: ~/open5gs
+        clone: true
+        version: 'v2.5.8'
+
+    # Compile with meson (yeah, this does not work at all. Ansible did not like it at all. I will probably make a shell script out of this)
+    - name: Compile Open5GS with meson
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/compileOpen5GS.sh"
+        chdir: "{{ homepath }}/open5gs"
+
+    # Install Open5GS with Ninjabuild
+    - name: Build and Install Open5GS
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/install.sh"
+        chdir: "{{ homepath }}/open5gs"
+
+
+    # Replace {amf,upf,smf}.yaml with default from Github
+
+    # Copy Default Github Configuration into build path to reset values
+    - name: Copy default AMF.yaml
+      ansible.builtin.copy:
+        src: "{{ homepath }}/open5gs/configs/open5gs/amf.yaml.in"
+        dest: "{{ homepath }}/open5gs/install/etc/open5gs/amf.yaml"
+        mode: '0660'
+        force: true
+        remote_src: true
+
+    # Copy Default Github Configuration into build path to reset values
+    - name: Copy default SMF.yaml
+      ansible.builtin.copy:
+        src: "{{ homepath }}/open5gs/configs/open5gs/smf.yaml.in"
+        dest: "{{ homepath }}/open5gs/install/etc/open5gs/smf.yaml"
+        mode: '0660'
+        force: true
+        remote_src: true
+
+
+    - name: Change Logger File Directory AMF
+      ansible.builtin.replace:
+        path: "{{ homepath }}/open5gs/install/etc/open5gs/amf.yaml"
+        regexp: '^logger:\n    file:.*'
+        replace: 'logger:\n    file: {{ homepath }}/open5gs/install/var/log/open5gs/amf.log'
+
+    - name: Change Logger File Directory for SMF
+      ansible.builtin.replace:
+        path: "{{ homepath }}/open5gs/install/etc/open5gs/smf.yaml"
+        regexp: '^logger:\n    file:.*'
+        replace: 'logger:\n    file: {{ homepath }}/open5gs/install/var/log/open5gs/smf.log'
+
+    - name: Change SystemConfig File Directory for SMF
+      ansible.builtin.replace:
+        path: "{{ homepath }}/open5gs/install/etc/open5gs/smf.yaml"
+        regexp: '^.*freeDiameter:.*'
+        replace: '    freeDiameter: {{ homepath }}/open5gs/install/etc/freeDiameter/smf.conf'
+
+    # Configure NGAP in AMF configuration in C Plane
+    - name: Expose AMF IP Address
+      ansible.builtin.replace:
+        path: ~/open5gs/install/etc/open5gs/amf.yaml
+        regexp: '^.*amf:\n.*\n.*\n.*\n.*ngap:\n.*'
+        replace: 'amf:\n    sbi:\n      - addr: 127.0.0.5\n        port: 7777\n    ngap:\n      - addr: {{ amf }}'
+
+    # Configure PFCP in SMF configuration in C Plane
+    - name: Expose PFCP IP Address
+      ansible.builtin.replace:
+        path: ~/open5gs/install/etc/open5gs/smf.yaml
+        regexp: '^    pfcp:\n      - addr: 127.0.0.4\n      - addr: ::1'
+        replace: '    pfcp:\n      - addr: {{ amf }}'
+
+    # Configure GTPU in SMF configuration C Plane
+    - name: Expose PFCP IP Address
+      ansible.builtin.replace:
+        path: ~/open5gs/install/etc/open5gs/smf.yaml
+        regexp: '^    gtpu:\n      - addr: 127.0.0.4\n      - addr: ::1'
+        replace: '    gtpu:\n      - addr: {{ amf }}'
+
+    # Configure PFCP to locate UPF
+    - name: Set UPF PFCP IP Address
+      ansible.builtin.replace:
+        path: ~/open5gs/install/etc/open5gs/smf.yaml
+        regexp: '^upf:\n.*\n.*'
+        replace: 'upf:\n    pfcp:\n      - addr: {{ upf }}'
+
+    # Copy Open5GS executables into /usr/bin/
+    - name: Copy open5gs- executables into /usr/bin/
+      ansible.builtin.copy:
+        src: "{{ homepath }}/open5gs/install/bin/"
+        dest: /usr/bin/
+        mode: '0777'
+        force: true
+        remote_src: true
+      become: true
+
+
+    # Install NPM Open5GS WebUI
+    - name: Install Open5GS WebUI based on package json
+      community.general.npm:
+        ci: true
+        path: "{{ homepath }}/open5gs/webui"
+      become: true
+
+    # Run WebUI on server
+    - name: Run the WebUI
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/runWebUI.sh"
+      become: true
+
+    # Remove defaultSubscriber for UERANSIM
+    - name: Remove defaultSubscriber in MongoDB
+      community.mongodb.mongodb_shell:
+        debug: true
+        db: open5gs
+        eval: "db.runCommand({delete:\"subscribers\",deletes:[{q:{imsi:\"999700000000001\"},limit:0}],writeConcern:{w:\"majority\",wtimeout:5000}})"
+
+
+    # Add defaultSubscriber for UERANSIM
+    - name: Add defaultSubscriber in MongoDB
+      community.mongodb.mongodb_shell:
+        debug: true
+        db: open5gs
+        eval: "db.subscribers.insert([{\"_id\":{\"oid\":\"6408f5e68fe29844587708de\"},\"schema_version\":1,\"imsi\":\"999700000000001\",\"msisdn\":[],\"imeisv\":\"4370816125816151\",\"mme_host\":[],\"mme_realm\":[],\"purge_flag\":[],\"security\":{\"k\":\"465B5CE8B199B49FAA5F0A2EE238A6BC\",\"op\":null,\"opc\":\"E8ED289DEBA952E4283B54E88E6183CA\",\"amf\":\"8000\",\"sqn\":225},\"ambr\":{\"downlink\":{\"value\":1,\"unit\":3},\"uplink\":{\"value\":1,\"unit\":3}},\"slice\":[{\"sst\":1,\"default_indicator\":true,\"session\":[{\"name\":\"internet\",\"type\":3,\"qos\":{\"index\":9,\"arp\":{\"priority_level\":8,\"pre_emption_capability\":1,\"pre_emption_vulnerability\":1}},\"ambr\":{\"downlink\":{\"value\":1,\"unit\":3},\"uplink\":{\"value\":1,\"unit\":3}},\"_id\":{\"$oid\":\"6408f5e68fe29844587708e0\"},\"pcc_rule\":[]}],\"_id\":{\"$oid\":\"6408f5e68fe29844587708df\"}}],\"access_restriction_data\":32,\"subscriber_status\":0,\"network_access_mode\":0,\"subscribed_rau_tau_timer\":12,\"__v\":0}])"
+
+    # Run open5g core
+    - name: Run 5G core
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/runOpen5GCore.sh"
+      become: true

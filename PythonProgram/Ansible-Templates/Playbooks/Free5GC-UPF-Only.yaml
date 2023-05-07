@@ -1,0 +1,141 @@
+- name: Setup Free5GC UPF
+  hosts: upf
+
+  vars:
+    homepath: "{{homepath.input}}"
+    hostname: "{{hostname.input}}"
+    scriptpath: "{{scriptpath.input}}"
+    amf: "{{amf_ip}}"
+    upf: "{{upf_ip}}"
+
+  environment:
+    GOPATH: '{{ homepath }}/go'
+    GOROOT: '/usr/local/go'
+    PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/usr/local/go/bin:/usr/local/go/bin'
+    GO111MODULE: 'auto'
+
+  tasks:
+
+    - name: Print environment
+      ansible.builtin.debug:
+        msg: "{{ ansible_env }}"
+
+    - name: Ping my hosts
+      ansible.builtin.ping:
+
+    - name: Print message
+      ansible.builtin.debug:
+        msg: Hello world
+
+    # Disable unattended-upgrades
+    - name: Disable unattended-upgrades
+      ansible.builtin.systemd:
+        state: stopped
+        name: unattended-upgrades
+        enabled: false
+      become: true
+
+    - name: Install wget git curl
+      ansible.builtin.apt:
+        name:
+          - wget
+          - git
+          - curl
+        update_cache: true
+        state: present
+      become: true
+    - name: Download Go
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/getGo.sh"
+
+    - name: Install Go
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/copyGo.sh"
+      become: true
+
+    - name: Install prerequities for free5gc
+      ansible.builtin.apt:
+        name:
+          - gcc
+          - g++
+          - cmake
+          - autoconf
+          - libtool
+          - pkg-config
+          - libmnl-dev
+          - libyaml-dev
+        state: present
+      become: true
+
+    - name: Setup Network configuration
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/netconfF5GC.sh"
+      become: true
+
+    - name: Clone a repo with separate git directory
+      ansible.builtin.git:
+        repo: https://github.com/free5gc/free5gc.git
+        dest: ~/free5gc
+        clone: true
+        version: 'v3.2.1'
+        update: false
+
+    - name: Copy Default Config Files as Backup for later
+      ansible.builtin.copy:
+        src: "{{ homepath }}/free5gc/config/"
+        dest: "{{ homepath }}/backupConfs/"
+        mode: '0777'
+        force: false
+        remote_src: true
+
+    # Copy Default Github Configuration into build path to reset values
+    - name: Copy default upfcfg.yaml
+      ansible.builtin.copy:
+        src: "{{ homepath }}/backupConfs/upfcfg.yaml"
+        dest: "{{ homepath }}/free5gc/config/upfcfg.yaml"
+        mode: '0660'
+        force: true
+        remote_src: true
+
+    - name: Build free5gc upf
+      make:
+        chdir: ~/free5gc
+        target: upf
+
+    # Install UPF
+    - name: Get UPF via Git
+      ansible.builtin.git:
+        repo: https://github.com/free5gc/gtp5g.git
+        dest: ~/gtp5g
+        version: 'v0.6.8'
+        update: false
+
+    - name: Build UPF via make
+      make:
+        chdir: ~/gtp5g
+
+    - name: Install UPF
+      make:
+        chdir: "{{ homepath }}/gtp5g"
+        target: install
+      become: true
+
+    # Configure UPF
+    - name: Expose PFCP IP Address
+      ansible.builtin.replace:
+        path: ~/free5gc/config/upfcfg.yaml
+        regexp: '^pfcp:\n.*\n.*'
+        replace: 'pfcp:\n  addr: {{ upf }}\n  nodeID: {{ upf }}'
+
+    # Configure UPF
+    - name: Expose GTPU IP Address
+      ansible.builtin.replace:
+        path: ~/free5gc/config/upfcfg.yaml
+        regexp: '^.*ifList:\n.*'
+        replace: '  ifList:\n    - addr: {{ upf }}'
+
+    # Run free5gc
+    - name: Run the UPF
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/runFree5GCUPF.sh"
+      become: true

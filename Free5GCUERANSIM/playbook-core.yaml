@@ -1,0 +1,266 @@
+- name: Setup Free5GC Core
+  hosts: 5gcore
+
+  environment:
+    GOPATH: '/home/user5g/go'
+    GOROOT: '/usr/local/go'
+    PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/usr/local/go/bin:/usr/local/go/bin'
+    GO111MODULE: 'auto'
+
+  tasks:
+
+    - name: Print environment
+      ansible.builtin.debug:
+        msg: "{{ ansible_env }}"
+
+    - name: Ping my hosts
+      ansible.builtin.ping:
+
+    - name: Print message
+      ansible.builtin.debug:
+        msg: Hello world
+
+    # Disable unattended-upgrades
+    - name: Disable unattended-upgrades
+      ansible.builtin.systemd:
+        state: stopped
+        name: unattended-upgrades
+        enabled: false
+      become: true
+
+    - name: Install wget git curl
+      ansible.builtin.apt:
+        name:
+          - wget
+          - git
+          - curl
+        update_cache: true
+        state: present
+      become: true
+
+    # Import GPG Key and add it into apt trusted sources
+    - name: MongoDB | no apt key
+      ansible.builtin.get_url:
+        url: https://www.mongodb.org/static/pgp/server-6.0.asc
+        dest: /etc/apt/trusted.gpg.d/server-6.0.asc
+      become: true
+
+    - name: MongoDB | apt sources
+      ansible.builtin.apt_repository:
+        repo: "deb https://repo.mongodb.org/apt/ubuntu/ jammy/mongodb-org/6.0 multiverse"
+        state: present
+        filename: mongodb-org-6.0.list
+        update_cache: true
+      become: true
+
+    - name: Install MongoDB
+      ansible.builtin.apt:
+        name: mongodb-org
+        update_cache: true
+        state: present
+      become: true
+
+    - name: Start & Enable the MongoDB Service
+      ansible.builtin.systemd:
+        state: started
+        name: mongod
+        enabled: true
+      become: true
+
+    - name: Download Go
+      ansible.builtin.script:
+        cmd: ~/Documents/Bachelor/5gops/Free5GCUERANSIM/getGo.sh --creates installed-go.txt
+
+    - name: Install Go
+      ansible.builtin.script:
+        cmd: ~/Documents/Bachelor/5gops/Free5GCUERANSIM/copyGo.sh
+      become: true
+
+    - name: Install prerequities for free5gc
+      ansible.builtin.apt:
+        name:
+          - gcc
+          - g++
+          - cmake
+          - autoconf
+          - libtool
+          - pkg-config
+          - libmnl-dev
+          - libyaml-dev
+        state: present
+      become: true
+
+    - name: Setup Network configuration
+      ansible.builtin.script:
+        cmd: ~/Documents/Bachelor/5gops/Free5GCUERANSIM/netconf.sh
+      become: true
+
+    - name: Clone a repo with separate git directory
+      ansible.builtin.git:
+        repo: https://github.com/free5gc/free5gc.git
+        dest: ~/free5gc
+        clone: true
+        version: 'v3.2.1'
+        update: false
+
+    - name: Build free5gc
+      make:
+        chdir: ~/free5gc
+
+    # Install UPF
+    - name: Get UPF via Git
+      ansible.builtin.git:
+        repo: https://github.com/free5gc/gtp5g.git
+        dest: ~/gtp5g
+        version: 'v0.6.8'
+        update: false
+
+    - name: Build UPF via make
+      make:
+        chdir: ~/gtp5g
+
+    - name: Install UPF
+      make:
+        chdir: /home/user5g/gtp5g
+        target: install
+      become: true
+
+    # Install WebConsole
+    - name: Remove apt yarn and cmdtest
+      ansible.builtin.apt:
+        name:
+          - yarn
+          - cmdtest
+        state: absent
+      become: true
+
+    # Import GPG Key and add it into apt trusted sources
+    - name: Import GPG KEY for Yarn
+      ansible.builtin.get_url:
+        url: https://dl.yarnpkg.com/debian/pubkey.gpg
+        dest: /etc/apt/trusted.gpg.d/yarnpkg.asc
+      become: true
+
+    - name: Add repo in sources list
+      ansible.builtin.apt_repository:
+        repo: "deb https://dl.yarnpkg.com/debian/ stable main"
+        state: present
+        filename: yarn.list
+        update_cache: true
+      become: true
+
+    - name: Install apt yarn
+      ansible.builtin.apt:
+        name:
+          - yarn
+        update_cache: true
+        state: present
+      become: true
+
+    # Install NodeJs via apt
+    - name: "Add nodejs apt key"
+      ansible.builtin.apt_key:
+        url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
+        state: present
+      become: true
+
+    - name: "Add nodejs 12.x ppa for apt repo"
+      ansible.builtin.apt_repository:
+        repo: deb https://deb.nodesource.com/node_12.x focal main
+        update_cache: true
+      become: true
+
+    - name: Install NodeJs
+      ansible.builtin.apt:
+        name: nodejs
+        state: present
+      become: true
+
+    - name: Build and Install WebConsole
+      make:
+        chdir: ~/free5gc
+        target: webconsole
+
+    # Configure NGAP in AMF configuration
+    - name: Expose AMF IP Address
+      ansible.builtin.replace:
+        path: ~/free5gc/config/amfcfg.yaml
+        regexp: '^.*ngapIpList:.*\n.*'
+        replace: '  ngapIpList:\n    - 192.168.122.173'
+
+    # Configure SMF
+    - name: Configure SMF IP Address
+      ansible.builtin.replace:
+        path: ~/free5gc/config/smfcfg.yaml
+        regexp: '^.*endpoints:.*\n.*'
+        replace: '            endpoints:\n              - 192.168.122.173'
+
+    # Configure UPF
+    - name: Expose UPF IP Address
+      ansible.builtin.replace:
+        path: ~/free5gc/config/upfcfg.yaml
+        regexp: '^.*ifList:\n.*'
+        replace: '  ifList:\n    - addr: 192.168.122.173'
+
+    # Run WebConsole on server
+    - name: Run the WebUI
+      ansible.builtin.script:
+        cmd: ~/Documents/Bachelor/5gops/Free5GCUERANSIM/runWebConsole.sh
+      become: true
+
+    # Drop database for UERANSIM
+    - name: Remove defaultSubscriber in MongoDB
+      community.mongodb.mongodb_shell:
+        debug: true
+        db: free5gc
+        eval: "db.dropDatabase()"
+
+    # Populate Mongo with defaultSubscriber for UERANSIM
+    - name: Populate policyData.ues.amData
+      community.mongodb.mongodb_shell:
+        debug: true
+        db: free5gc
+        eval: "db.policyData.ues.amData.insert({\"subscCats\":[\"free5gc\"],\"ueId\":\"imsi-208930000000003\"})"
+
+    # Populate Mongo with defaultSubscriber for UERANSIM
+    - name: Populate policyData.ues.smData
+      community.mongodb.mongodb_shell:
+        debug: true
+        db: free5gc
+        eval: "db.policyData.ues.smData.insert({\"smPolicySnssaiData\":{\"01010203\":{\"snssai\":{\"sst\":1,\"sd\":\"010203\"},\"smPolicyDnnData\":{\"internet\":{\"dnn\":\"internet\"},\"internet2\":{\"dnn\":\"internet2\"}}},\"01112233\":{\"snssai\":{\"sst\":1,\"sd\":\"112233\"},\"smPolicyDnnData\":{\"internet\":{\"dnn\":\"internet\"},\"internet2\":{\"dnn\":\"internet2\"}}}},\"ueId\":\"imsi-208930000000003\"})"
+
+    - name: Populate subscriptionData.authenticationData.authenticationSubscription
+      community.mongodb.mongodb_shell:
+        debug: true
+        db: free5gc
+        eval: "db.subscriptionData.authenticationData.authenticationSubscription.insert({\"authenticationMethod\":\"5G_AKA\",\"permanentKey\":{\"permanentKeyValue\":\"8baf473f2f8fd09487cccbd7097c6862\",\"encryptionAlgorithm\":0,\"encryptionKey\":0},\"sequenceNumber\":\"000000000022\",\"authenticationManagementField\":\"8000\",\"milenage\":{\"op\":{\"encryptionAlgorithm\":0,\"encryptionKey\":0,\"opValue\":\"\"}},\"opc\":{\"encryptionAlgorithm\":0,\"encryptionKey\":0,\"opcValue\":\"8e27b6af0e692e750f32667a3b14605d\"},\"ueId\":\"imsi-208930000000003\"})"
+
+    - name: Populate subscriptionData.provisionedData.amData
+      community.mongodb.mongodb_shell:
+        debug: true
+        db: free5gc
+        eval: "db.subscriptionData.provisionedData.amData.insert({\"gpsis\":[\"msisdn-0900000000\"],\"subscribedUeAmbr\":{\"uplink\":\"1Gbps\",\"downlink\":\"2Gbps\"},\"nssai\":{\"defaultSingleNssais\":[{\"sst\":1,\"sd\":\"010203\"},{\"sst\":1,\"sd\":\"112233\"}]},\"ueId\":\"imsi-208930000000003\",\"servingPlmnId\":\"20893\"})"
+
+    - name: Populate subscriptionData.provisionedData.smData part 1
+      community.mongodb.mongodb_shell:
+        debug: true
+        db: free5gc
+        eval: "db.subscriptionData.provisionedData.smData.insert({\"singleNssai\":{\"sst\":1,\"sd\":\"010203\"},\"dnnConfigurations\":{\"internet\":{\"5gQosProfile\":{\"5qi\":9,\"arp\":{\"preemptVuln\":\"\",\"priorityLevel\":8,\"preemptCap\":\"\"},\"priorityLevel\":8},\"sessionAmbr\":{\"uplink\":\"200\ Mbps\",\"downlink\":\"100\ Mbps\"},\"pduSessionTypes\":{\"defaultSessionType\":\"IPV4\",\"allowedSessionTypes\":[\"IPV4\"]},\"sscModes\":{\"defaultSscMode\":\"SSC_MODE_1\",\"allowedSscModes\":[\"SSC_MODE_2\",\"SSC_MODE_3\"]}},\"internet2\":{\"sscModes\":{\"defaultSscMode\":\"SSC_MODE_1\",\"allowedSscModes\":[\"SSC_MODE_2\",\"SSC_MODE_3\"]},\"5gQosProfile\":{\"priorityLevel\":8,\"5qi\":9,\"arp\":{\"priorityLevel\":8,\"preemptCap\":\"\",\"preemptVuln\":\"\"}},\"sessionAmbr\":{\"uplink\":\"200\ Mbps\",\"downlink\":\"100\ Mbps\"},\"pduSessionTypes\":{\"defaultSessionType\":\"IPV4\",\"allowedSessionTypes\":[\"IPV4\"]}}},\"ueId\":\"imsi-208930000000003\",\"servingPlmnId\":\"20893\"})"
+
+    - name: Populate subscriptionData.provisionedData.smData part 2
+      community.mongodb.mongodb_shell:
+        debug: true
+        db: free5gc
+        eval: "db.subscriptionData.provisionedData.smData.insert({\"dnnConfigurations\":{\"internet\":{\"pduSessionTypes\":{\"defaultSessionType\":\"IPV4\",\"allowedSessionTypes\":[\"IPV4\"]},\"sscModes\":{\"defaultSscMode\":\"SSC_MODE_1\",\"allowedSscModes\":[\"SSC_MODE_2\",\"SSC_MODE_3\"]},\"5gQosProfile\":{\"priorityLevel\":8,\"5qi\":9,\"arp\":{\"priorityLevel\":8,\"preemptCap\":\"\",\"preemptVuln\":\"\"}},\"sessionAmbr\":{\"uplink\":\"200\ Mbps\",\"downlink\":\"100\ Mbps\"}},\"internet2\":{\"sessionAmbr\":{\"downlink\":\"100\ Mbps\",\"uplink\":\"200\ Mbps\"},\"pduSessionTypes\":{\"defaultSessionType\":\"IPV4\",\"allowedSessionTypes\":[\"IPV4\"]},\"sscModes\":{\"defaultSscMode\":\"SSC_MODE_1\",\"allowedSscModes\":[\"SSC_MODE_2\",\"SSC_MODE_3\"]},\"5gQosProfile\":{\"5qi\":9,\"arp\":{\"priorityLevel\":8,\"preemptCap\":\"\",\"preemptVuln\":\"\"},\"priorityLevel\":8}}},\"ueId\":\"imsi-208930000000003\",\"servingPlmnId\":\"20893\",\"singleNssai\":{\"sst\":1,\"sd\":\"112233\"}})"
+
+    - name: Populate subscriptionData.provisionedData.smfSelectionSubscriptionData
+      community.mongodb.mongodb_shell:
+        debug: true
+        db: free5gc
+        eval: "db.subscriptionData.provisionedData.smfSelectionSubscriptionData.insert({\"subscribedSnssaiInfos\":{\"01010203\":{\"dnnInfos\":[{\"dnn\":\"internet\"},{\"dnn\":\"internet2\"}]},\"01112233\":{\"dnnInfos\":[{\"dnn\":\"internet\"},{\"dnn\":\"internet2\"}]}},\"ueId\":\"imsi-208930000000003\",\"servingPlmnId\":\"20893\"})"
+
+    # Run free5gc
+    - name: Run the Core
+      ansible.builtin.script:
+        cmd: ~/Documents/Bachelor/5gops/Free5GCUERANSIM/runFree5GCCore.sh
+      become: true

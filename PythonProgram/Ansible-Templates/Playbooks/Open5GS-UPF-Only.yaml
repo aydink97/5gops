@@ -1,0 +1,131 @@
+- name: Setup UPF
+  hosts: upf
+
+  vars:
+    homepath: "{{homepath.input}}"
+    hostname: "{{hostname.input}}"
+    scriptpath: "{{scriptpath.input}}"
+    amf: "{{amf_ip}}"
+    upf: "{{upf_ip}}"
+
+  tasks:
+
+    - name: Ping my host
+      ansible.builtin.ping:
+
+    - name: Print message
+      ansible.builtin.debug:
+        msg: Hello World
+
+    # Disable unattended-upgrades
+    - name: Disable unattended-upgrades
+      ansible.builtin.systemd:
+        state: stopped
+        name: unattended-upgrades
+        enabled: false
+      become: true
+
+    # Update apt and install packages if necessary
+    - name: Install wget gnupg curl
+      ansible.builtin.apt:
+        name:
+          - wget
+          - gnupg
+          - curl
+        update_cache: true
+        state: present
+      become: true
+
+    # Getting necessary dependencies for building from source
+    - name: Get build dependencies
+      ansible.builtin.apt:
+        name:
+          - python3-pip
+          - python3-setuptools
+          - python3-wheel
+          - ninja-build
+          - build-essential
+          - flex
+          - bison
+          - git
+          - cmake
+          - libsctp-dev
+          - libgnutls28-dev
+          - libgcrypt-dev
+          - libssl-dev
+          - libidn11-dev
+          - libmongoc-dev
+          - libbson-dev
+          - libyaml-dev
+          - libnghttp2-dev
+          - libmicrohttpd-dev
+          - libcurl4-gnutls-dev
+          - libnghttp2-dev
+          - libtins-dev
+          - libtalloc-dev
+          - meson
+        state: present
+      become: true
+
+
+    - name: Clone a repo with separate git directory
+      ansible.builtin.git:
+        repo: https://github.com/open5gs/open5gs.git
+        dest: ~/open5gs
+        clone: true
+        version: 'v2.5.8'
+
+    - name: Compile UPF
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/compileOpen5GSUPF.sh"
+        chdir: "{{ homepath }}/open5gs"
+
+    # Install Open5GS with Ninjabuild
+    - name: Build and Install Open5GS
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/install.sh"
+        chdir: "{{ homepath }}/open5gs"
+
+    # Copy Default Github Configuration into build path to reset values
+    - name: Copy default UPF.yaml
+      ansible.builtin.copy:
+        src: "{{ homepath }}/open5gs/configs/open5gs/upf.yaml.in"
+        dest: "{{ homepath }}/open5gs/install/etc/open5gs/upf.yaml"
+        mode: '0660'
+        force: true
+        remote_src: true
+
+    - name: Change Logger File Directory for UPF
+      ansible.builtin.replace:
+        path: "{{ homepath }}/open5gs/install/etc/open5gs/upf.yaml"
+        regexp: '^logger:\n    file:.*'
+        replace: 'logger:\n    file: {{ homepath }}/open5gs/install/var/log/open5gs/upf.log'
+
+    # Configure GTP in UPF configuration
+    - name: Expose GTP IP Address
+      ansible.builtin.replace:
+        path: ~/open5gs/install/etc/open5gs/upf.yaml
+        regexp: '^.*upf:\n.*\n.*\n.*\n      - addr:.*'
+        replace: 'upf:\n    pfcp:\n      - addr: {{ upf }}\n    gtpu:\n      - addr: {{ upf }}'
+
+    # Create TUN Interface for Open5GS
+    - name: Execute netconf.sh in the Git Project
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/netconfO5GS.sh"
+      become: true
+
+    # Copy Open5GS executables into /usr/bin/
+    - name: Copy open5gs- executables into /usr/bin/
+      ansible.builtin.copy:
+        src: "{{ homepath }}/open5gs/install/bin/"
+        dest: /usr/bin/
+        mode: '0777'
+        force: true
+        remote_src: true
+      become: true
+
+    # Run open5g UPF
+    - name: Run 5G UPF
+      ansible.builtin.script:
+        cmd: "{{ scriptpath }}/runOpen5GSUPF.sh"
+      become: true

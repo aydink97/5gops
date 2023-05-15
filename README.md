@@ -18,7 +18,7 @@ This is all tested in KVM (Virtual Machines), before procedure it is highly reco
 To use this software, it has to be started in the PythonProgram folder. Otherwise it cannot access the Template Folder.
 
 0. !!! Important !!! Again, run the program in the directory where it's located
-1. Open the GUI
+1. Open the GUI (run the program with ``` python3 main.py ```)
 2. Select the Core Solution
 3. Check if the UPF is running on a seperate VM / Hardware
 4. Fill in the fields correspondingly (When the AMF is running on the UPF, please put in the same IP address in there)

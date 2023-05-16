@@ -49,14 +49,21 @@ To run the ansible configurations. Use a command similar to this.
 
 - To deploy 5G Core with UPF and UERANSIM: (2 Endpoints)
 ```
-ansible-playbook -i inventory.yaml playbook-{coresolution}.yaml playboook-{correct-ue}.yaml -K
+ansible-playbook -i inventory.yaml playbook-{coresolution}.yaml playbook-{correct-ue}.yaml -K
 ```
 - To deploy 5G Core without UPF and UERANSIM and UPF Only (3 Endpoints)
 ```
-ansible-playbook -i inventory.yaml playbook-{coresolution}.yaml playbook-{UPF-Only}.yaml playboook-{correct-ue}.yaml -K
+ansible-playbook -i inventory.yaml playbook-{coresolution}-UPF-Only.yaml playbook-{coresolution}-Without-UPF.yaml playbook-{coresolution}-UE.yaml -K
 ```
 
-Note: It seems Free5GC prefers to have the UPF running before the SMF, in that case. Run the playbook-{UPF-Only}.yaml before the playbook-{coresolution}.yaml
+For example, a deployment for Open5GS with a separate UPF would be:
+
+```
+ansible-playbook -i inventory.yaml playbook-Open5GS-UPF-Only.yaml playbook-Open5GS-Without-UPF.yaml playbook-Open5GS-UE.yaml -K
+
+```
+
+Note: Free5GC prefers to have the UPF running before the SMF, that is why it is necessary to run the playbook-{UPF-Only}.yaml before the playbook-{coresolution}.yaml. Open5GS should be working with both ways, but to be sure start the UPF before the Core
 
 For example:
 ```
